@@ -77,16 +77,16 @@ typedef struct {
 void malloc_run_state(RunState* s, Config* p) {
     // we calloc instead of malloc to keep valgrind happy
     int kv_dim = (p->dim * p->n_kv_heads) / p->n_heads;
-    s->x = calloc(p->dim, sizeof(float));
-    s->xb = calloc(p->dim, sizeof(float));
-    s->xb2 = calloc(p->dim, sizeof(float));
-    s->hb = calloc(p->hidden_dim, sizeof(float));
-    s->hb2 = calloc(p->hidden_dim, sizeof(float));
-    s->q = calloc(p->dim, sizeof(float));
-    s->key_cache = calloc(p->n_layers * p->seq_len * kv_dim, sizeof(float));
-    s->value_cache = calloc(p->n_layers * p->seq_len * kv_dim, sizeof(float));
-    s->att = calloc(p->n_heads * p->seq_len, sizeof(float));
-    s->logits = calloc(p->vocab_size, sizeof(float));
+    s->x = malloc(p->dim * sizeof(float));
+    s->xb = malloc(p->dim * sizeof(float));
+    s->xb2 = malloc(p->dim * sizeof(float));
+    s->hb = malloc(p->hidden_dim * sizeof(float));
+    s->hb2 = malloc(p->hidden_dim *  sizeof(float));
+    s->q = malloc(p->dim * sizeof(float));
+    s->key_cache = malloc(p->n_layers * p->seq_len * kv_dim * sizeof(float));
+    s->value_cache = malloc(p->n_layers * p->seq_len * kv_dim * sizeof(float));
+    s->att = malloc(p->n_heads * p->seq_len * sizeof(float));
+    s->logits = malloc(p->vocab_size * sizeof(float));
     // ensure all mallocs went fine
     if (!s->x || !s->xb || !s->xb2 || !s->hb || !s->hb2 || !s->q
      || !s->key_cache || !s->value_cache || !s->att || !s->logits) {
@@ -903,6 +903,14 @@ void error_usage() {
     exit(EXIT_FAILURE);
 }
 
+
+#ifdef PIN_HOOK
+void pin_start() asm("pin_hook_init");
+void pin_stop() asm("pin_hook_fini");
+__attribute_noinline__ void pin_start() {fprintf(stderr, "PIN START\n");}
+__attribute_noinline__ void pin_stop() { fprintf(stderr, "PIN END\n"); }
+#endif // PIN_HOOK
+#include <omp.h>
 int main(int argc, char *argv[]) {
 
     // default parameters
@@ -954,6 +962,8 @@ int main(int argc, char *argv[]) {
     Sampler sampler;
     build_sampler(&sampler, transformer.config.vocab_size, temperature, topp, rng_seed);
 
+    fprintf(stderr, "[OMP] Num threads: %d\n", omp_get_max_threads());
+    pin_start();
     // run!
     if (strcmp(mode, "generate") == 0) {
         generate(&transformer, &tokenizer, &sampler, prompt, steps);
@@ -963,6 +973,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "unknown mode: %s\n", mode);
         error_usage();
     }
+    pin_stop();
 
     // memory and file handles cleanup
     free_sampler(&sampler);
